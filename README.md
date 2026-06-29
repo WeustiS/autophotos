@@ -68,7 +68,13 @@ rescan reconciles by hash, not path.
   MakerNotes: focus distance / drive mode); exposure-bracket, burst, and pano
   hints work from pure-Python EXIF.
 
-## Roadmap
+## Implemented (v0.2)
+
+Personalized taste (PIAA), crop suggestions, zero-shot tags + clusters, edit
+queue + stack confirmation, named galaxy axes, and a full CLI/API. See
+FEATURES.md and CHANGELOG.md.
+
+## Roadmap (next)
 
 - **v2** — FastAPI HTTP layer + Tauri viewer (Rust shell spawns the engine as a
   sidecar); keyboard-driven culling, loupe (on-demand RAW decode), stack-review queue.
