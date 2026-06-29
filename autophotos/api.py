@@ -1,24 +1,18 @@
-"""FastAPI engine — the backend for the v2 culling viewer.
+"""FastAPI engine — backend for the v2 culling viewer.
 
-Run:
-    pip install -e ".[api]"
-    set AUTOPHOTOS_LIBRARY=C:/Users/willc/Pictures/ukgood   (or export on bash)
-    uvicorn autophotos.api:app --port 8731
-    # open http://localhost:8731
-
-The browser UI (served at /) is the culling client: keyboard rating, loupe,
-stack-review queue, picks, and semantic search. A Tauri shell can later wrap this
-exact server as a sidecar for a native app; nothing here changes.
+  pip install -e ".[api]"
+  export AUTOPHOTOS_LIBRARY=/path/to/library
+  uvicorn autophotos.api:app --port 8731   # open http://localhost:8731
 """
 from __future__ import annotations
-import io
 import os
 
-from . import config, db, pipeline, xmp, pick, semantic
+from . import (config, db, pipeline, xmp, pick, semantic, taste, crop,
+               categories, decisions)
 
 try:
-    from fastapi import FastAPI, HTTPException, Query
-    from fastapi.responses import HTMLResponse, Response, JSONResponse
+    from fastapi import FastAPI, HTTPException, Query, Body
+    from fastapi.responses import HTMLResponse, Response
 except Exception as e:  # pragma: no cover
     raise SystemExit("FastAPI not installed. Run: pip install -e '.[api]'") from e
 
@@ -27,8 +21,7 @@ def _lib():
     root = os.environ.get("AUTOPHOTOS_LIBRARY")
     if not root:
         raise HTTPException(400, "set AUTOPHOTOS_LIBRARY to a library path")
-    lib = config.Library(root)
-    lib.ensure_dirs()
+    lib = config.Library(root); lib.ensure_dirs()
     return lib, db.connect(lib.db_path)
 
 
@@ -41,19 +34,19 @@ def photos():
     gm = {r["hash"]: r["group_id"]
           for r in con.execute("SELECT hash, group_id FROM group_members")}
     rows = con.execute(
-        "SELECT p.hash,p.filename,p.captured_at,p.camera_model,"
-        "r.rating,r.pick,r.label,s.aesthetic,s.sharpness,s.exposure_ok "
+        "SELECT p.hash,p.filename,p.captured_at,p.camera_model,r.rating,r.pick,"
+        "r.label,s.aesthetic,s.personal,s.sharpness,s.exposure_ok "
         "FROM photos p LEFT JOIN ratings r USING(hash) LEFT JOIN scores s USING(hash) "
         "ORDER BY p.captured_at").fetchall()
-    out = [dict(r) | {"group": gm.get(r["hash"])} for r in rows]
+    q = set(decisions.queue_list(lib.decisions_path))
+    out = [dict(r) | {"group": gm.get(r["hash"]), "queued": r["hash"] in q} for r in rows]
     return {"library": lib.root, "count": len(out), "photos": out}
 
 
 @app.get("/api/thumb/{h}")
 def thumb(h: str, size: int = 256):
     lib, _ = _lib()
-    key = "1024" if size > 256 else "256"
-    p = lib.thumb_paths(h)[key]
+    p = lib.thumb_paths(h)["1024" if size > 256 else "256"]
     if not os.path.exists(p):
         raise HTTPException(404, "no thumb")
     return Response(open(p, "rb").read(), media_type="image/jpeg")
@@ -97,22 +90,68 @@ def picks(k: int = 50):
     return {"summary": pick.summary(con), "picks": pick.top_picks(con, k=k)}
 
 
+@app.get("/api/review")
+def review(k: int = 100):
+    lib, con = _lib()
+    return {"order": taste.review_order(lib, con)[:k]}
+
+
+@app.post("/api/train-taste")
+def train_taste(l2: float = 1.0):
+    lib, con = _lib()
+    rep = taste.train(lib, con, l2=l2)
+    if rep.get("trained"):
+        rep["applied"] = taste.apply_scores(lib, con)
+    return rep
+
+
+@app.get("/api/crops/{h}")
+def crops(h: str, k: int = 3):
+    lib, con = _lib()
+    row = con.execute("SELECT width,height FROM photos WHERE hash=?", (h,)).fetchone()
+    ratio = (row["width"]/row["height"]) if row and row["width"] and row["height"] else None
+    tp = lib.thumb_paths(h)["1024"]
+    if not os.path.exists(tp):
+        raise HTTPException(404, "no thumb")
+    return {"hash": h, "crops": crop.crop_suggestions(tp, n=k, orig_ratio=ratio)}
+
+
 @app.get("/api/search")
 def search(q: str = Query(...), k: int = 30):
     lib, con = _lib()
     from .embed import get_embedder
-    emb = get_embedder(prefer_clip=True)
     try:
-        res = semantic.search_text(lib, q, emb, k=k)
+        res = semantic.search_text(lib, q, get_embedder(True), k=k)
     except Exception as e:
         raise HTTPException(400, str(e))
     return {"q": q, "results": [{"hash": h, "score": s} for h, s in res]}
 
 
+@app.get("/api/queue")
+def queue_get():
+    lib, _ = _lib()
+    return {"queue": decisions.queue_list(lib.decisions_path)}
+
+
+@app.post("/api/queue")
+def queue_post(op: str = Query(...), hashes: list[str] = Body(default=[])):
+    lib, _ = _lib()
+    p = lib.decisions_path
+    q = (decisions.queue_add(p, hashes) if op == "add"
+         else decisions.queue_remove(p, hashes) if op == "rm"
+         else decisions.queue_list(p))
+    return {"queue": q}
+
+
+@app.post("/api/confirm-group")
+def confirm_group(members: list[str] = Body(...), kind: str = Body("burst"),
+                  action: str = Body("keep-best")):
+    lib, _ = _lib()
+    g = decisions.confirm_group(lib.decisions_path, members, kind, action)
+    return {"confirmed_groups": len(g)}
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
-    here = os.path.dirname(__file__)
-    p = os.path.join(here, "web", "culler.html")
-    if os.path.exists(p):
-        return open(p, encoding="utf-8").read()
-    return "<h1>autophotos</h1><p>culler.html missing</p>"
+    p = os.path.join(os.path.dirname(__file__), "web", "culler.html")
+    return open(p, encoding="utf-8").read() if os.path.exists(p) else "<h1>autophotos</h1>"
