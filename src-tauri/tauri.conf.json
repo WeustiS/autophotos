@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "autophotos",
+  "version": "0.1.0",
+  "identifier": "com.autophotos.viewer",
+  "build": {
+    "frontendDist": "../autophotos/web"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "autophotos",
+        "width": 1400,
+        "height": 900,
+        "url": "http://localhost:8731"
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

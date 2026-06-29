@@ -1,0 +1,118 @@
+<!doctype html><html><head><meta charset="utf-8"><title>autophotos · cull</title>
+<style>
+ :root{--bg:#0e1013;--pan:#15181d;--fg:#e9eaec;--mut:#878d97;--line:#262b33;--accent:#ffcf33}
+ *{box-sizing:border-box}html,body{margin:0;height:100%}
+ body{background:var(--bg);color:var(--fg);font:13px/1.45 system-ui,sans-serif;display:flex;flex-direction:column}
+ #bar{display:flex;gap:14px;align-items:center;padding:8px 14px;background:var(--pan);border-bottom:1px solid var(--line)}
+ #bar b{color:#fff}.tab{padding:4px 10px;border-radius:6px;cursor:pointer;color:var(--mut)}
+ .tab.on{background:#222831;color:#fff}#q{margin-left:auto;background:#222831;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:5px 9px;width:260px}
+ #wrap{flex:1;overflow:auto;padding:12px}
+ #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+ .cell{position:relative;background:#000;border:2px solid transparent;border-radius:6px;overflow:hidden;aspect-ratio:3/2;cursor:pointer}
+ .cell img{width:100%;height:100%;object-fit:cover;display:block}
+ .cell.sel{border-color:var(--accent)}
+ .cell.rej{opacity:.4}
+ .badge{position:absolute;left:5px;top:5px;background:#000a;border-radius:4px;padding:1px 6px;font-size:12px}
+ .pk{position:absolute;right:5px;top:5px;font-size:13px}
+ .fn{position:absolute;left:0;right:0;bottom:0;background:#000a;font-size:10px;padding:2px 5px;color:#cfd3da;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ #loupe{position:fixed;inset:0;background:#000e;display:none;align-items:center;justify-content:center;z-index:50}
+ #loupe img{max-width:96%;max-height:92%}
+ #loupe .meta{position:fixed;top:10px;left:14px;color:#fff}
+ .grp{margin-bottom:18px}.grp h4{margin:6px 0;color:#cfd3da;font-weight:600}
+ .grp .row{display:flex;gap:6px;overflow-x:auto}.grp .row img{height:120px;border-radius:4px}
+ .kind{font-size:11px;color:#0e1013;background:var(--accent);border-radius:4px;padding:0 6px;margin-left:8px}
+ #help{color:var(--mut);font-size:12px;padding:4px 14px;background:var(--pan);border-top:1px solid var(--line)}
+ .pickrow{display:flex;align-items:center;gap:10px;padding:4px 0;border-bottom:1px solid var(--line)}
+ .pickrow img{height:56px;border-radius:4px}
+</style></head><body>
+<div id="bar">
+ <b>autophotos</b><span id="lib" class="mut"></span>
+ <span class="tab on" data-v="cull">Cull</span>
+ <span class="tab" data-v="stacks">Stacks</span>
+ <span class="tab" data-v="picks">Picks</span>
+ <input id="q" placeholder="semantic search (needs CLIP)… ↵">
+</div>
+<div id="wrap"><div id="grid"></div></div>
+<div id="help">←/→ select · 1–5 stars · 0 clear · P pick · X reject · Space loupe</div>
+<div id="loupe"><div class="meta" id="lmeta"></div><img id="limg"></div>
+<script>
+const API="";let photos=[],sel=0,view="cull",filter=null;
+const grid=document.getElementById('grid'),loupe=document.getElementById('loupe');
+async function load(){
+  const d=await (await fetch(API+"/api/photos")).json();
+  photos=d.photos; document.getElementById('lib').textContent=" · "+d.library.split(/[\\/]/).pop()+" ("+d.count+")";
+  render();
+}
+function star(n){return n?'★'.repeat(n):''}
+function render(){
+  if(view==="cull")return renderCull();
+  if(view==="stacks")return renderStacks();
+  if(view==="picks")return renderPicks();
+}
+function renderCull(){
+  grid.style.display="grid"; grid.innerHTML="";
+  const list=filter?photos.filter(p=>filter.has(p.hash)):photos;
+  list.forEach((p,i)=>{
+    const c=document.createElement('div');c.className="cell"+(i===sel?" sel":"")+(p.pick===-1?" rej":"");
+    c.innerHTML=`<img loading=lazy src="${API}/api/thumb/${p.hash}">`+
+      (p.rating?`<span class="badge">${star(p.rating)}</span>`:"")+
+      (p.pick===1?`<span class="pk">✓</span>`:"")+
+      (p.group?`<span class="pk" style="right:24px;color:#6cf">⛃</span>`:"")+
+      `<span class="fn">${p.filename}</span>`;
+    c.onclick=()=>{sel=i;render()}; c.ondblclick=()=>openLoupe(p);
+    grid.appendChild(c);
+  });
+  const s=grid.children[sel]; if(s)s.scrollIntoView({block:"nearest"});
+}
+function curList(){return filter?photos.filter(p=>filter.has(p.hash)):photos;}
+function openLoupe(p){loupe.style.display="flex";
+  document.getElementById('limg').src=API+"/api/preview/"+p.hash;
+  document.getElementById('lmeta').textContent=p.filename+"  "+star(p.rating||0)+(p.aesthetic?("  aes "+p.aesthetic.toFixed(2)):"");}
+async function setRating(p,opt){
+  const qs=new URLSearchParams({hash:p.hash,...opt});
+  const r=await (await fetch(API+"/api/rate?"+qs,{method:"POST"})).json();
+  Object.assign(p,{rating:r.rating.rating,pick:r.rating.pick,label:r.rating.label});render();
+}
+async function renderStacks(){
+  grid.style.display="block";grid.innerHTML="Loading…";
+  const d=await (await fetch(API+"/api/groups")).json();
+  const by=Object.fromEntries(photos.map(p=>[p.hash,p]));
+  grid.innerHTML=d.groups.map(g=>`<div class="grp"><h4>${g.kind_hint}<span class="kind">n=${g.n}</span>
+    <span class="mut">${(g.t_start||'').slice(11,19)}</span></h4><div class="row">`+
+    g.members.map(h=>`<img src="${API}/api/thumb/${h}">`).join("")+`</div></div>`).join("")||"No groups.";
+}
+async function renderPicks(){
+  grid.style.display="block";grid.innerHTML="Loading…";
+  const d=await (await fetch(API+"/api/picks?k=60")).json();
+  const by=Object.fromEntries(photos.map(p=>[p.filename,p]));
+  grid.innerHTML=`<p class="mut">${d.summary.representatives} representatives from ${d.summary.photos} photos (${d.summary.collapsed_away} burst frames collapsed)</p>`+
+    d.picks.map((p,i)=>{const ph=by[p.filename];return `<div class="pickrow"><b>${i+1}</b>`+
+    (ph?`<img src="${API}/api/thumb/${ph.hash}">`:"")+`<span>${p.filename}</span>`+
+    `<span class="mut">aes ${p.aesthetic??'–'} · sharp ${p.sharpness??'–'} ${p.from_group?('· group of '+p.group_size):''}</span></div>`}).join("");
+}
+async function doSearch(q){
+  if(!q){filter=null;view="cull";render();return;}
+  const r=await fetch(API+"/api/search?q="+encodeURIComponent(q)+"&k=40");
+  if(!r.ok){alert("search: "+(await r.json()).detail);return;}
+  const d=await r.json();filter=new Set(d.results.map(x=>x.hash));view="cull";sel=0;render();
+}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));t.classList.add('on');
+  view=t.dataset.v;render();});
+document.getElementById('q').addEventListener('keydown',e=>{if(e.key==="Enter")doSearch(e.target.value.trim());});
+addEventListener('keydown',e=>{
+  if(document.activeElement.id==="q")return;
+  if(loupe.style.display==="flex"&&e.key!=="Escape"&&e.key!==" ")return;
+  const list=curList();
+  if(e.key==="ArrowRight"){sel=Math.min(sel+1,list.length-1);render();}
+  else if(e.key==="ArrowLeft"){sel=Math.max(sel-1,0);render();}
+  else if(e.key>="1"&&e.key<="5"){setRating(list[sel],{stars:e.key});}
+  else if(e.key==="0"){setRating(list[sel],{stars:0});}
+  else if(e.key.toLowerCase()==="p"){setRating(list[sel],{stars:list[sel].rating||0});list[sel].pick=1;render();}
+  else if(e.key.toLowerCase()==="x"){setRating(list[sel],{reject:true});}
+  else if(e.key===" "){e.preventDefault();loupe.style.display==="flex"?loupe.style.display="none":openLoupe(list[sel]);}
+  else if(e.key==="Escape"){loupe.style.display="none";}
+});
+loupe.onclick=()=>loupe.style.display="none";
+load();
+</script></body></html>

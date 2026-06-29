@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.autophotos/
+_review/
+_synctest.py
+_newtest.py
+.DS_Store
+build/
+dist/
