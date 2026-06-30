@@ -33,3 +33,27 @@ def test_multiple_distinct_suggestions():
     sug = crop.crop_suggestions(p, n=3)
     assert 1 <= len(sug) <= 3
     assert all("aspect" in s and "score" in s for s in sug)
+
+
+class _MockEmb:
+    semantic = True
+    def embed_images(self, paths):
+        import numpy as np
+        from PIL import Image
+        out = []
+        for p in paths:
+            m = np.asarray(Image.open(p).convert("L"), np.float32).mean() / 255.0
+            out.append([m, 1 - m])
+        return np.array(out, np.float32)
+
+
+def test_aesthetic_guided_prefers_subject_crop():
+    from autophotos.score import AestheticHead
+    import numpy as np
+    p, fx, fy = _img_with_blob(0.7, 0.5)
+    head = AestheticHead([(np.array([[1.0, 0.0]], np.float32), np.array([0.0], np.float32))])
+    sug = crop.suggest_crops(p, n=3, embedder=_MockEmb(), head=head)
+    assert sug and sug[0]["method"] == "aesthetic"
+    box = sug[0]["box"]
+    # the top (brightest=most-textured) crop should contain the subject
+    assert box[0] <= fx <= box[2] and box[1] <= fy <= box[3]

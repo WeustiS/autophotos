@@ -27,6 +27,26 @@ def _lib():
 
 app = FastAPI(title="autophotos")
 
+_CROP = {}
+def _crop_models(lib):
+    if "done" in _CROP:
+        return _CROP.get("emb"), _CROP.get("head"), _CROP.get("tw")
+    _CROP["done"] = True
+    try:
+        import json, numpy as np
+        from .score import AestheticHead
+        from .embed import get_embedder
+        meta = json.load(open(lib.model_path)) if os.path.exists(lib.model_path) else {}
+        if meta.get("semantic"):
+            _CROP["emb"] = get_embedder(prefer_clip=True)
+            _CROP["head"] = AestheticHead.load(lib.cache_dir)
+            tp = os.path.join(lib.cache_dir, "taste_head.npz")
+            _CROP["tw"] = np.load(tp)["w"] if os.path.exists(tp) else None
+    except Exception as e:
+        print("[crops] model load failed:", e)
+    return _CROP.get("emb"), _CROP.get("head"), _CROP.get("tw")
+
+
 
 @app.get("/api/photos")
 def photos():
@@ -113,7 +133,9 @@ def crops(h: str, k: int = 3):
     tp = lib.thumb_paths(h)["1024"]
     if not os.path.exists(tp):
         raise HTTPException(404, "no thumb")
-    return {"hash": h, "crops": crop.crop_suggestions(tp, n=k, orig_ratio=ratio)}
+    emb, head, tw = _crop_models(lib)
+    return {"hash": h, "crops": crop.suggest_crops(tp, n=k, orig_ratio=ratio,
+                                                   embedder=emb, head=head, taste_w=tw)}
 
 
 @app.get("/api/search")

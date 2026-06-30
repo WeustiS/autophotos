@@ -88,8 +88,21 @@ def cmd_crops(a):
     row = con.execute("SELECT width,height FROM photos WHERE hash=?", (a.hash,)).fetchone()
     ratio = (row["width"]/row["height"]) if row and row["width"] and row["height"] else None
     tp = lib.thumb_paths(a.hash)["1024"]
-    for c in crop.crop_suggestions(tp, n=a.k, orig_ratio=ratio):
-        print(f"  {c['aspect']:5} score={c['score']:.4f} box={c['box']}")
+    emb = head = tw = None
+    if not a.heuristic:
+        try:
+            import json, numpy as np
+            from .score import AestheticHead
+            from .embed import get_embedder
+            meta = json.load(open(lib.model_path)) if os.path.exists(lib.model_path) else {}
+            if meta.get("semantic"):
+                emb = get_embedder(prefer_clip=True); head = AestheticHead.load(lib.cache_dir)
+                p = os.path.join(lib.cache_dir, "taste_head.npz")
+                tw = np.load(p)["w"] if os.path.exists(p) else None
+        except Exception as e:
+            print("[crops] falling back to heuristic:", e)
+    for c in crop.suggest_crops(tp, n=a.k, orig_ratio=ratio, embedder=emb, head=head, taste_w=tw):
+        print(f"  {c['method']:9} {c['aspect']:5} score={c['score']:.4f} box={c['box']}")
 
 def _names(lib, con, results):
     by = {r["hash"]: r["filename"] for r in db.photos(con)}
@@ -158,7 +171,7 @@ def main(argv=None):
     P("cluster", cmd_cluster).add_argument("-k", type=int, default=8)
     P("review", cmd_review).add_argument("-k", type=int, default=30)
     s = P("train-taste", cmd_train_taste); s.add_argument("--l2", type=float, default=1.0)
-    s = P("crops", cmd_crops); s.add_argument("hash"); s.add_argument("-k", type=int, default=3)
+    s = P("crops", cmd_crops); s.add_argument("hash"); s.add_argument("-k", type=int, default=3); s.add_argument("--heuristic", action="store_true")
     for n, f in [("embed", cmd_embed), ("index", cmd_index)]:
         P(n, f).add_argument("--no-clip", action="store_true")
     r = P("rate", cmd_rate, lib=False); r.add_argument("raw")
