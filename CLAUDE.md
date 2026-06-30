@@ -158,3 +158,47 @@ round-trip, semantic axes/layout, aesthetic-head folding, export.
 Wire a real GAIC/ProCrop model into the crop hook; attach a stronger VLM
 captioner; LoRA-finetune the taste head once enough ratings accrue; expose taste
 re-training and caption browsing in the viewer; ship the galaxy as a hosted site.
+
+## 11. Handoff notes (for the next agent / desktop Claude Code)
+
+Status: feature-complete v0.2.1, 24 tests passing. Built and validated in a Linux
+sandbox that could NOT install Rust or reach HuggingFace, so two things are
+**written but never run for real** — verify them first on this machine.
+
+### First, sanity-check the environment
+```bash
+pip install -e ".[all]" && pytest -q            # expect 24 passed
+export AUTOPHOTOS_EMBED_MODEL=ViT-L-14 AUTOPHOTOS_EMBED_PRETRAINED=openai
+autophotos index "<library>" && autophotos stats "<library>"
+```
+CLIP embeddings + the LAION aesthetic head were already validated on the user's
+ukgood (36) and palmspringsandSC (598) libraries.
+
+### Unverified — confirm these end-to-end here
+1. **BLIP captioner** (`categories.BlipCaptioner`, `autophotos caption`): never run
+   with real weights (HF was blocked). First run downloads
+   `Salesforce/blip-image-captioning-base`; confirm `captions.json` looks sane.
+2. **Tauri app** (`src-tauri/`): never compiled. Install rustup + `cargo install
+   tauri-cli` + WebView2, then `cd src-tauri && cargo tauri dev`. Treat the first
+   build as the smoke test; fix conf/capabilities as needed (see docs/TAURI.md).
+3. **Aesthetic-guided crops**: logic is mock-tested; eyeball real results via the
+   loupe `C` overlay or `autophotos crops <hash>`.
+
+### Known gaps / good next tasks
+- **Confirmed-group actions are recorded but not executed.** `decisions.confirm_group`
+  logs `keep-best|assemble|discard` to decisions.json but nothing acts on them yet.
+  Low-risk win: wire `keep-best`/`discard` to write XMP rejects (rating -1) to the
+  non-kept frames via `xmp.write_rating`.
+- **Galaxy inlines base64 thumbs** → one big HTML. Fine to ~couple thousand; for
+  larger libraries externalize thumbs or paginate.
+- **No API tests** — only engine units are tested. Add FastAPI TestClient tests.
+- **Video (.mp4) is skipped** entirely.
+- **CLIP loads lazily per server process**, so the first `/search` or `/crops`
+  request is slow (model load); consider a warmup call.
+- Keep `AUTOPHOTOS_EMBED_MODEL` consistent across runs — switching backbones
+  changes embedding dim and silently disables the aesthetic head (needs 768-d).
+
+### Roadmap (bigger)
+Real GAIC/ProCrop into the crop hook; stronger VLM captioner; LoRA-finetune taste
+once ratings accrue; expose taste-retrain + caption browsing in the viewer; host
+the galaxy.
