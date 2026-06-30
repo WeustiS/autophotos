@@ -1,115 +1,79 @@
 # autophotos
 
-A pipeline to ingest, cull, group, score, and (later) creatively display photos.
-See `PLAN.md` for the high-level design and `ARCHITECTURE.md` for the code-level
-plan.
+A local, filesystem-first pipeline to **cull, group, score, and explore** a large
+photo library from a mirrorless workflow (built/tested on Sony `.ARW`). It ingests
+RAWs, scores them for technical and aesthetic quality, learns *your* taste from
+your star ratings, groups bursts/stacks, suggests crops, and gives you a fast
+browser culling app plus an interactive "galaxy" gallery — all offline, with your
+ratings written to standard XMP sidecars.
 
-**Status: v1 engine — working and validated on real libraries.**
-Validated end-to-end on `ukgood` (36 ARW) and `bday-palmsprings` (598 ARW): scan
-of 598 files in ~8.5 s, correct EXIF/scores, 70 candidate burst groups, and a
-non-destructive XMP rating write that preserves darktable edit history
-byte-for-byte.
+> Detailed walkthrough: **[CLAUDE.md](CLAUDE.md)**. Deep dives in **[docs/](docs/)**.
 
-## Quickstart (portable)
+## Features
 
-Clone and install on any machine (Windows/macOS/Linux, Python 3.10+):
-
-```bash
-git clone https://github.com/WeustiS/autophotos.git
-cd autophotos
-python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -e ".[all]"                            # core + CLIP + API + captions
-```
-
-Point it at a folder of RAWs and go:
-
-```bash
-# CLIP backbone (recommended; matches the aesthetic head)
-export AUTOPHOTOS_EMBED_MODEL=ViT-L-14 AUTOPHOTOS_EMBED_PRETRAINED=openai
-autophotos index "/path/to/photos"          # scan + thumbs + embed + group + score
-python -m autophotos.assets fetch-aesthetic "/path/to/photos"
-autophotos score "/path/to/photos"
-
-# cull in the browser
-export AUTOPHOTOS_LIBRARY="/path/to/photos"
-uvicorn autophotos.api:app --port 8731       # open http://localhost:8731
-```
-
-Nothing is hardcoded to a machine: libraries are passed by path, all state lives
-under `<library>/.autophotos/` (rebuildable) and XMP sidecars (your ratings). Move
-the repo or the photos freely. See FEATURES.md for every command, SETUP.md for
-details, TAURI.md for the native window.
-
-## What works now (the headless engine)
-
-A Python package that treats the **filesystem as the source of truth** and builds
-a fully rebuildable cache (`.autophotos/cache/`):
-
-- `scan`   — walk a library, content-hash each RAW, reconcile new/moved/deleted, read EXIF
-- `thumbs` — extract the embedded JPEG preview (~6 ms/file) into a 256/1024/preview pyramid
-- `embed`  — image embeddings (CLIP when installed; a non-semantic fallback otherwise)
-- `group`  — candidate stacks/bursts from timestamp runs + EXIF deltas + embedding similarity
-- `score`  — technical scores (sharpness, exposure); aesthetic head when CLIP is active
-- `rate`   — write star/reject/label to XMP sidecars, non-destructively (darktable/Lightroom-safe)
+- **Fast ingest** — content-hash identity, embedded-JPEG previews (~6 ms/file), no re-decode.
+- **Cull** — browser viewer: keyboard rating, loupe, reject/pick, edit queue.
+- **Scoring** — sharpness + exposure (always); CLIP + LAION aesthetic (with CLIP);
+  **personal taste** learned from your ratings (PIAA).
+- **Grouping** — burst / bracket / focus-stack / pano candidates; best-of-group picks.
+- **Crops** — aesthetic-guided crop suggestions (CLIP-scored), heuristic fallback.
+- **Semantic** — text search, "more like this", custom axes, zero-shot tags, clusters, BLIP captions.
+- **Galaxy** — a self-contained interactive `gallery.html` (2D map, aesthetic color, custom axes).
+- **Safe** — filesystem is the source of truth; everything in `.autophotos/` is a rebuildable cache; ratings live in XMP (darktable/Lightroom-compatible).
 
 ## Install
 
 ```bash
-pip install -e .            # core engine
-pip install -e .[clip]      # + torch + open_clip for real semantic embeddings
+git clone https://github.com/WeustiS/autophotos.git && cd autophotos
+python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install -e ".[all]"                           # core + CLIP + API + captions
 ```
+Python 3.10+. CLIP/captions pull in torch (a few hundred MB on first install).
 
-## Usage
+## Quickstart
 
 ```bash
-autophotos index  /path/to/library      # scan + thumbs + embed + group + score + xmp sync
-autophotos scan   /path/to/library
-autophotos group  /path/to/library
-autophotos stats  /path/to/library
-autophotos rate   /path/to/photo.ARW --stars 4
-autophotos rate   /path/to/photo.ARW --reject
+# recommended CLIP backbone (matches the aesthetic head)
+export AUTOPHOTOS_EMBED_MODEL=ViT-L-14 AUTOPHOTOS_EMBED_PRETRAINED=openai
+
+autophotos index "/path/to/photos"                       # scan+thumbs+embed+group+score
+python -m autophotos.assets fetch-aesthetic "/path/to/photos" && autophotos score "/path/to/photos"
+
+export AUTOPHOTOS_LIBRARY="/path/to/photos"
+uvicorn autophotos.api:app --port 8731                   # cull at http://localhost:8731
+
+python -m autophotos.export "/path/to/photos"            # build the galaxy gallery.html
 ```
 
-By default the cache lives in `<library>/.autophotos/`. If the library is on a
-network/FUSE mount that can't host a SQLite file, relocate the cache:
+After you've rated a couple dozen shots: `autophotos train-taste "/path/to/photos"`
+to personalize the ranking.
 
-```bash
-export AUTOPHOTOS_CACHE_DIR=/some/local/disk
+## Commands (cheat-sheet)
+
+| | |
+|---|---|
+| `index / scan / thumbs / embed / group / score` | pipeline stages |
+| `stats / picks` | summary; best-of-group ranking |
+| `rate <raw> --stars N [--reject]` | write XMP rating |
+| `train-taste / review` | learn taste; sort unrated by predicted taste |
+| `crops <hash>` | crop suggestions |
+| `search "text" / similar <hash> / axis --pos a,b --neg c,d` | semantic |
+| `tag / cluster / caption` | categories + captions |
+| `queue {add\|rm\|list} / confirm-group` | edit queue, stack decisions |
+
+Full reference: [docs/FEATURES.md](docs/FEATURES.md). Native window: [docs/TAURI.md](docs/TAURI.md).
+
+## Project layout
+
+```
+autophotos/        engine package (scan, embed, group, score, taste, crop,
+                   categories, semantic, pick, export, api, cli, web/culler.html)
+tests/             unit tests (pytest)
+src-tauri/         optional native window wrapper (Tauri v2)
+docs/              PLAN, ARCHITECTURE, SETUP, FEATURES, TAURI, CHANGELOG
+CLAUDE.md          detailed walkthrough
 ```
 
-## Data tiers (never confused)
+## License
 
-| Tier | Location | Rebuildable? |
-|---|---|---|
-| Source RAW | library root | no (your originals) |
-| User decisions | `*.xmp` sidecars + `.autophotos/decisions.json` | no (human input) |
-| Derived cache | `.autophotos/cache/` (sqlite, embeddings.npy, thumbs) | yes — delete & rebuild |
-
-Identity is a content hash, so moving/renaming files in Explorer is safe — a
-rescan reconciles by hash, not path.
-
-## Notes / known items
-
-- Test data is a Sony A7 III (`ILCE-7M3`); the pipeline is camera-agnostic (reads
-  model/dimensions from EXIF).
-- Aesthetic scores are only populated with the CLIP backbone active. The fallback
-  embedder is non-semantic (used to prove the pipeline runs without torch).
-- `focus`-stack detection is reliable only with `exiftool` present (Sony
-  MakerNotes: focus distance / drive mode); exposure-bracket, burst, and pano
-  hints work from pure-Python EXIF.
-
-## Implemented (v0.2)
-
-Personalized taste (PIAA), crop suggestions, zero-shot tags + clusters, edit
-queue + stack confirmation, named galaxy axes, and a full CLI/API. See
-FEATURES.md and CHANGELOG.md.
-
-## Roadmap (next)
-
-- **v2** — FastAPI HTTP layer + Tauri viewer (Rust shell spawns the engine as a
-  sidecar); keyboard-driven culling, loupe (on-demand RAW decode), stack-review queue.
-- **v2.5** — GAIC crop proposals; personal-taste (PIAA/LoRA) head trained on
-  accumulated ratings.
-- **v3** — semantic axes + static WebGL website (semantic search, custom
-  hot↔cold axes, galaxy map).
-```
+MIT — see [LICENSE](LICENSE).
