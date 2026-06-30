@@ -7,6 +7,10 @@ venv/
 _review/
 _synctest.py
 _newtest.py
+autophotos.bundle
+gallery.html
+report.json
 .DS_Store
 build/
 dist/
+src-tauri/target/

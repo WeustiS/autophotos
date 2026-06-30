@@ -10,6 +10,36 @@ of 598 files in ~8.5 s, correct EXIF/scores, 70 candidate burst groups, and a
 non-destructive XMP rating write that preserves darktable edit history
 byte-for-byte.
 
+## Quickstart (portable)
+
+Clone and install on any machine (Windows/macOS/Linux, Python 3.10+):
+
+```bash
+git clone https://github.com/WeustiS/autophotos.git
+cd autophotos
+python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -e ".[all]"                            # core + CLIP + API + captions
+```
+
+Point it at a folder of RAWs and go:
+
+```bash
+# CLIP backbone (recommended; matches the aesthetic head)
+export AUTOPHOTOS_EMBED_MODEL=ViT-L-14 AUTOPHOTOS_EMBED_PRETRAINED=openai
+autophotos index "/path/to/photos"          # scan + thumbs + embed + group + score
+python -m autophotos.assets fetch-aesthetic "/path/to/photos"
+autophotos score "/path/to/photos"
+
+# cull in the browser
+export AUTOPHOTOS_LIBRARY="/path/to/photos"
+uvicorn autophotos.api:app --port 8731       # open http://localhost:8731
+```
+
+Nothing is hardcoded to a machine: libraries are passed by path, all state lives
+under `<library>/.autophotos/` (rebuildable) and XMP sidecars (your ratings). Move
+the repo or the photos freely. See FEATURES.md for every command, SETUP.md for
+details, TAURI.md for the native window.
+
 ## What works now (the headless engine)
 
 A Python package that treats the **filesystem as the source of truth** and builds
