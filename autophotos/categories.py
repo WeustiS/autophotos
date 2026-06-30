@@ -1,12 +1,12 @@
-"""Semantic categories for the library (Stage 3).
+"""Semantic categories + captions for the library (Stage 3).
 
-Two complementary tools:
-  - tag_library: zero-shot CLIP tags from a candidate vocabulary (needs CLIP)
-  - discover: unsupervised k-means clusters over embeddings (works with any
-    embedder); name clusters by their dominant zero-shot tag or a VLM caption.
+  - tag_library: zero-shot CLIP tags from a vocabulary (needs CLIP)
+  - discover: unsupervised k-means clusters over embeddings (any embedder)
+  - caption_library: real image captions via a BLIP model (transformers); writes
+    captions.json. Captions double as alt-text, searchable metadata, and cluster
+    labels. Graceful no-op if transformers/weights aren't installed.
 
-The pure functions (assign_tags, kmeans) are model-free and unit-tested; the
-library wrappers just supply embeddings/text vectors.
+Pure functions (assign_tags, kmeans) are model-free and unit-tested.
 """
 from __future__ import annotations
 import json
@@ -24,8 +24,7 @@ DEFAULT_VOCAB = [
 ]
 
 
-def assign_tags(img: np.ndarray, tags: np.ndarray, names, topk=3, thresh=0.18):
-    """img [N,D], tags [T,D] (all L2-normalized). -> list per image of (name,score)."""
+def assign_tags(img, tags, names, topk=3, thresh=0.18):
     sims = img @ tags.T
     out = []
     for row in sims:
@@ -34,14 +33,14 @@ def assign_tags(img: np.ndarray, tags: np.ndarray, names, topk=3, thresh=0.18):
     return out
 
 
-def kmeans(X: np.ndarray, k: int, iters=50, seed=0):
+def kmeans(X, k, iters=50, seed=0):
     rng = np.random.default_rng(seed)
     c = X[rng.choice(len(X), size=min(k, len(X)), replace=False)].copy()
     labels = np.zeros(len(X), int)
-    for _ in range(iters):
+    for it in range(iters):
         d = ((X[:, None, :] - c[None, :, :]) ** 2).sum(-1)
         new = d.argmin(1)
-        if np.array_equal(new, labels) and _ > 0:
+        if it > 0 and np.array_equal(new, labels):
             break
         labels = new
         for j in range(len(c)):
@@ -54,31 +53,75 @@ def kmeans(X: np.ndarray, k: int, iters=50, seed=0):
 def _load(lib):
     vecs = np.load(lib.emb_path).astype(np.float32)
     ids = json.load(open(lib.ids_path))
-    meta = json.load(open(lib.model_path)) if os.path.exists(lib.model_path) else {}
-    return ids, vecs, meta
+    return ids, vecs
 
 
-def tag_library(lib: config.Library, embedder, vocab=None, topk=3, thresh=0.18):
+def tag_library(lib, embedder, vocab=None, topk=3, thresh=0.18):
     if not getattr(embedder, "semantic", False):
         raise RuntimeError("zero-shot tagging needs a semantic (CLIP) embedder")
     vocab = vocab or DEFAULT_VOCAB
-    ids, vecs, _ = _load(lib)
+    ids, vecs = _load(lib)
     tvecs = embedder.embed_texts([f"a photo of {v}" for v in vocab])
-    tags = assign_tags(vecs, tvecs, vocab, topk=topk, thresh=thresh)
-    res = {ids[i]: tags[i] for i in range(len(ids))}
+    res = {ids[i]: t for i, t in enumerate(assign_tags(vecs, tvecs, vocab, topk, thresh))}
     json.dump(res, open(os.path.join(lib.cache_dir, "categories.json"), "w"), indent=2)
     return res
 
 
-def discover(lib: config.Library, k=8):
-    """k-means clusters over embeddings (no CLIP needed). -> {hash: cluster}."""
-    ids, vecs, _ = _load(lib)
+def discover(lib, k=8):
+    ids, vecs = _load(lib)
     labels, _ = kmeans(vecs, k)
     res = {ids[i]: int(labels[i]) for i in range(len(ids))}
     json.dump(res, open(os.path.join(lib.cache_dir, "clusters.json"), "w"), indent=2)
     return res
 
 
-def caption_images(paths, model):  # pragma: no cover - needs a VLM
-    """Hook for a VLM captioner (Qwen-VL/LLaVA/BLIP-2). model(path)->str."""
-    return {p: model(p) for p in paths}
+# --- captions -------------------------------------------------------------
+
+class BlipCaptioner:
+    """BLIP image captioner (transformers). CPU is fine for a few thousand thumbs.
+
+    model id default: Salesforce/blip-image-captioning-base (downloaded once).
+    """
+    def __init__(self, model_id="Salesforce/blip-image-captioning-base"):
+        import torch
+        from transformers import BlipProcessor, BlipForConditionalGeneration
+        self.torch = torch
+        self.proc = BlipProcessor.from_pretrained(model_id)
+        self.model = BlipForConditionalGeneration.from_pretrained(model_id).eval()
+        self.id = model_id
+
+    def __call__(self, path: str) -> str:
+        from PIL import Image
+        im = Image.open(path).convert("RGB")
+        inp = self.proc(im, return_tensors="pt")
+        with self.torch.no_grad():
+            out = self.model.generate(**inp, max_new_tokens=30)
+        return self.proc.decode(out[0], skip_special_tokens=True).strip()
+
+
+def load_captioner():
+    """Return a BlipCaptioner, or None if transformers/torch/weights unavailable."""
+    try:
+        return BlipCaptioner()
+    except Exception as e:
+        print(f"[caption] captioner unavailable ({type(e).__name__}: {e})")
+        return None
+
+
+def caption_library(lib: config.Library, captioner=None) -> dict:
+    """Caption every photo from its 1024 thumb; writes captions.json. Returns map."""
+    captioner = captioner or load_captioner()
+    if captioner is None:
+        return {}
+    ids = json.load(open(lib.ids_path))
+    out = {}
+    for h in ids:
+        tp = lib.thumb_paths(h)["1024"]
+        if os.path.exists(tp):
+            try:
+                out[h] = captioner(tp)
+            except Exception as e:
+                out[h] = ""
+                print(f"[caption] {h[:8]}: {e}")
+    json.dump(out, open(os.path.join(lib.cache_dir, "captions.json"), "w"), indent=2)
+    return out

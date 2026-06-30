@@ -133,6 +133,11 @@ def cmd_layout(a):
     out = os.path.join(lib.cache_dir, "layout2d.json")
     json.dump(semantic.layout_2d(lib), open(out, "w")); print("wrote", out)
 
+def cmd_caption(a):
+    lib, con = _lib(a.library)
+    res = categories.caption_library(lib)
+    print(f"captioned {len(res)} photos -> {lib.cache_dir}/captions.json")
+
 def cmd_tag(a):
     lib, con = _lib(a.library)
     from .embed import get_embedder
@@ -168,6 +173,7 @@ def main(argv=None):
         P(n, f)
     P("picks", cmd_picks).add_argument("-k", type=int, default=25)
     P("tag", cmd_tag)
+    P("caption", cmd_caption)
     P("cluster", cmd_cluster).add_argument("-k", type=int, default=8)
     P("review", cmd_review).add_argument("-k", type=int, default=30)
     s = P("train-taste", cmd_train_taste); s.add_argument("--l2", type=float, default=1.0)

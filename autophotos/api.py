@@ -173,6 +173,13 @@ def confirm_group(members: list[str] = Body(...), kind: str = Body("burst"),
     return {"confirmed_groups": len(g)}
 
 
+
+@app.post("/api/caption")
+def caption():
+    lib, con = _lib()
+    res = categories.caption_library(lib)
+    return {"captioned": len(res)}
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     p = os.path.join(os.path.dirname(__file__), "web", "culler.html")
