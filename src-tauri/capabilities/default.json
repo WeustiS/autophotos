@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "autophotos viewer window loads the local engine at localhost:8731",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 — real models + UI integration
+- Crop: real aesthetic-guided cropping (CLIP + LAION head reranks candidates;
+  optional taste vector). CLI/API use it automatically; --heuristic to force.
+- Captions: real BLIP captioner (transformers) + `caption` CLI / `/api/caption`.
+- Viewer: culler UI now exposes the full workflow — queue (Q) + Queue tab, crop
+  overlay on the loupe (C), Train-taste button, Sort-by-taste, and stack
+  confirmation (keep-best/assemble/discard) from the Stacks tab.
+- Tauri v2 scaffold corrected (capabilities + conf) with TAURI.md build steps.
+
+# Changelog
+
 ## 0.2.0 — full feature pass
 
 Engine
